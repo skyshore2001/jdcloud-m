@@ -1,0 +1,50 @@
+<div mui-initfn="initPageListDemo" mui-script="listDemo.js">
+	<div class="hd">
+		<a href="javascript:history.back();" class="icon icon-back"></a>
+		<h2>列表演示</h2>
+		<div class="mui-navbar">
+			<a href="javascript:;" mui-linkto="#lst1">奇数项</a>
+			<a href="javascript:;" mui-linkto="#lst2">定高容器</a>
+			<a href="javascript:;" mui-linkto="#lst3">不定高容器</a>
+		</div>
+	</div>
+
+	<div class="bd">
+		<!-- 标题栏的css类active标识缺省列表；列表上的mui-noPull标识非列表，避免上拉下拉动作。 -->
+		<div>
+			<div id="lst1" class="p-list weui_cells" data-queryParam="ac:'getList', type:'odd'"></div>
+
+			<div id="lst2" class="p-list weui_cells mui-noPull">
+				<div>
+					<li>定高容器，滚动时标题栏不动</li>
+				</div>
+				<div class="mui-navbar">
+					<a href="javascript:;" mui-linkto="#lst2_1">奇数项</a>
+					<a href="javascript:;" mui-linkto="#lst2_2">偶数项</a>
+				</div>
+				<div id="lst2Container">
+					<div id="lst2_1" class="p-list2 weui_cells" data-queryParam="ac:'getList', type:'odd'"></div>
+					<div id="lst2_2" class="p-list2 weui_cells" data-queryParam="ac:'getList', type:'even'"></div>
+				</div>
+			</div>
+
+			<div id="lst3" class="p-list weui_cells  mui-noPull">
+
+				<div>
+					<li>不定高容器，滚动时标题栏随动</li>
+					<li>设置了手工上拉加载</li>
+					<li>默认标题栏为“偶数项”</li>
+				</div>
+				<div class="mui-navbar">
+					<a href="javascript:;" mui-linkto="#lst3_1">奇数项</a>
+					<a href="javascript:;" mui-linkto="#lst3_2" class="active">偶数项</a>
+				</div>
+				<div>
+					<div id="lst3_1" class="p-list2 weui_cells" data-queryParam="ac:'getList', type:'odd'"></div>
+					<div id="lst3_2" class="p-list2 weui_cells" data-queryParam="ac:'getList', type:'even'"></div>
+				</div>
+
+			</div>
+		</div>
+	</div>
+</div>
