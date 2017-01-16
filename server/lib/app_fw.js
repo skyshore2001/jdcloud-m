@@ -3790,9 +3790,10 @@ function formatField(obj)
 
 //}}}
 
-// ====== app fw: list page {{{
+// ====== jquery-pullList {{{
 /**
-@fn initPullList(container, opt)
+@fn $.fn.pullList(opt)
+@alias initPullList(container, opt)
 
 为列表添加下拉刷新和上拉加载功能。
 
@@ -3854,7 +3855,7 @@ function formatField(obj)
 
 在合适的时机，它调用 onLoadItem(true) 来刷新列表，调用 onLoadItem(false) 来加载列表的下一页。在该回调中this为container对象（即容器）。实现该函数时应当自行管理当前的页号(pagekey)
 
-@param opt.autoLoadMore 当滑动到页面下方时（距离底部TRIGGER_AUTOLOAD=30px以内）自动加载更多项目。
+@param opt.autoLoadMore 当滑动到页面下方时（距离底部$.pullList.defaults.TRIGGER_AUTOLOAD=30px以内）自动加载更多项目。
 
 @param threshold 像素值。
 
@@ -3879,27 +3880,146 @@ function formatField(obj)
 
 如果返回false，则取消上拉加载或下拉刷新行为，采用系统默认行为。
 
+测试用例：
+
+- 组件自身可出现滚动条，可下拉刷新，上拉到底时自动加载。
+- 组件自身无滚动条，但再向上有组件有滚动条，可下拉刷新，上拉到底时自动加载。
+- 组件自身及向上均无滚动条（如一开始pagesz很小，没有填满容器），可下拉刷新，上拉到底时自动加载。
+- 一开始组件及父组件均无滚动条，后出现滚动条（或相反，滚动条从有到无，如加载很多记录后再刷新，未占满屏幕），可下拉刷新，上拉到底时自动加载。
+
+- 设置opt.autoLoadMore=false时，可手工上拉刷新
+- 在android/safari下分别测试
+- 在加载很慢时（如接口返回时间>=5s），测试反复下拉或上拉是否多次调用。
+- 在多个组件的滚动组件（scrollContainer_）相同时，检测是否冲突。
 */
+function jquery_pullList($) {
+
+var m_version = '1.0';
+
+var m_exposed = {
+/**
+@fn jQuery-pullList.version()
+
+取版本号:
+
+	var ver = jo.pullList("version");
+
+ */
+	version: function (jo) {
+		return m_version;
+	}
+};
+
+var m_defaults = {
+	prefix: "mui",
+	threshold: 180,
+	autoLoadMore: true,
+	TRIGGER_AUTOLOAD: 30, // px
+};
+
+/**
+@event autoload
+
+TODO: example
+*/
+// 滚动动作结束或到刚好到底部
+$.event.special["autoload"] = {
+	setup: function () {
+		var busy_ = false;
+		var jo = $(this);
+		jo.on("scroll.autoload", function (ev) {
+			if (getScrollToBottom(jo[0]) < m_defaults.TRIGGER_AUTOLOAD) {
+				if (!busy_) {
+					busy_ = true;
+					ev.type = 'autoload';
+					jo.trigger(ev);
+					scrollToBottom(jo[0]);
+				}
+			}
+			else {
+				busy_ = false;
+			}
+		});
+	},
+	teardown: function () {
+		$(this).off("scroll.autoload");
+	}
+};
+
+/**
+@fn $.fn.pullList(opt?)
+@fn $.fn.pullList(method, param1, ...)
+
+初始化pullList，或调用pullList的方法。
+
+@param opt
+@see $.fn.pullList.defaults
+ */
+$.fn.extend({
+	pullList: function(opt) {
+		var args = arguments;
+		return this.each(function () {
+			if (typeof(opt) == "string")
+			{
+				var fname = opt;
+				if (! m_exposed[fname])
+					$.error("*** unknown call: " + fname);
+
+				args[0] = $(this);
+				return m_exposed[fname].apply(args[0], args);
+			}
+
+			initPullList(this, opt);
+		});
+	}
+});
+
+/**
+@var $.fn.pullList.defaults
+*/
+$.fn.pullList.defaults = m_defaults;
+
+// NOTE: 不要用clientHeight，有兼容问题。
+// return: distance to bottom
+function getScrollToBottom(o)
+{
+	//return o.scrollHeight - o.clientHeight - o.scrollTop;
+	return o.scrollHeight - $(o).outerHeight(true) - o.scrollTop;
+}
+
+function canScroll(o)
+{
+	return o.scrollHeight > $(o).outerHeight(true);
+}
+
+function isScrollBottom(o)
+{
+	// NOTE: 华为mate7(安卓6.0)滚动到底，仍可能有1px的差弃。
+	return getScrollToBottom(o) <= 1;
+}
+
+function scrollToBottom(o)
+{
+	o.scrollTop = o.scrollHeight - o.clientHeight;
+}
+
+/**
+@fn initPullList(container, opt)
+
+@see $.fn.pullList
+*/
+window.initPullList = initPullList;
 function initPullList(container, opt)
 {
 	var opt_ = $.extend({
-		threshold: 180,
-		onHint: onHint,
-		autoLoadMore: true,
-	}, opt);
+		onHint: onHint
+	}, m_defaults, opt);
+
 	var cont_ = container;
+	var scrollContainer_ = null; // 实际出现滚动条的组件
 
 	var touchev_ = null; // {ac, x0, y0}
 	var mouseMoved_ = false;
-	var SAMPLE_INTERVAL = 200; // ms
-	var TRIGGER_AUTOLOAD = 30; // px
-
-	var lastUpdateTm_ = new Date();
-	var dy_; // 纵向移动。<0为上拉，>0为下拉
-
-	window.requestAnimationFrame = window.requestAnimationFrame || function (fn) {
-		setTimeout(fn, 1000/60);
-	};
 
 	if ("ontouchstart" in window) {
 		cont_.addEventListener("touchstart", touchStart);
@@ -3976,6 +4096,36 @@ function initPullList(container, opt)
 		opt_.onHint.call(this, ac, dy, opt_.threshold);
 	}
 
+	function onAutoload(ev)
+	{
+		if ($(container).is(":visible")) {
+			console.log("load more");
+			opt_.onLoadItem.call(cont_, false);
+		}
+	}
+
+	function checkScrollContainer(ev)
+	{
+		// 滚动条消失, 重新找scrollContainer
+		if (scrollContainer_ && !canScroll(scrollContainer_)) {
+			$(scrollContainer_).off("autoload", onAutoload);
+			scrollContainer_ = null;
+		}
+		if (scrollContainer_ == null) {
+			var o = cont_;
+			while (o != null) {
+				if (canScroll(o)) {
+					scrollContainer_ = o;
+					break;
+				}
+				o = o.parentElement;
+			}
+			if (scrollContainer_ && opt_.autoLoadMore) {
+				$(scrollContainer_).on("autoload", onAutoload);
+			}
+		}
+	}
+
 	function touchStart(ev)
 	{
 		if (opt_.onPull && opt_.onPull(ev) === false) {
@@ -3983,24 +4133,17 @@ function initPullList(container, opt)
 			return;
 		}
 
+		checkScrollContainer();
+
 		var p = getPos(ev);
 		touchev_ = {
 			ac: null,
-			// 原始top位置
-			top0: cont_.scrollTop,
 			// 原始光标位置
 			x0: p[0],
 			y0: p[1],
 			// 总移动位移
 			dx: 0,
 			dy: 0,
-
-			// 用于惯性滚动: 每SAMPLE_INTERVAL取样时最后一次时间及光标位置(用于计算初速度)
-			momentum: {
-				x0: p[0],
-				y0: p[1],
-				startTime: new Date()
-			}
 		};
 		//ev.preventDefault(); // 防止click等事件无法触发
 	}
@@ -4054,37 +4197,43 @@ function initPullList(container, opt)
 		if (touchev_ == null)
 			return;
 		var p = getPos(ev);
-		var m = touchev_.momentum;
-		if (m) {
-			var now = new Date();
-			if ( now - m.startTime > SAMPLE_INTERVAL ) {
-				m.startTime = now;
-				m.x0 = p[0];
-				m.y0 = p[1];
-			}
-		}
 
 		touchev_.dx = p[0] - touchev_.x0;
 		touchev_.dy = p[1] - touchev_.y0;
-		dy_ = touchev_.dy;
 
-		// 如果不是竖直下拉，则取消
+		// 纵向移动。<0为上拉，>0为下拉
+		var dy = touchev_.dy;
+
+		// 如果不是竖直下拉，不处理
 		if (touchev_.dy == 0 || Math.abs(touchev_.dx) > Math.abs(touchev_.dy)) {
 			touchCancel();
 			return;
 		}
+		// 非底部上拉，不做处理; 或自动加载更多时且外部有滚动条，不做处理
+		if (dy < 0 && scrollContainer_ && (opt_.autoLoadMore || ! isScrollBottom(scrollContainer_))) {
+			touchCancel();
+			return;
+		}
+		// 非顶部下拉，不做处理
+		if (dy > 0 && scrollContainer_ && scrollContainer_.scrollTop > 0) {
+			touchCancel();
+			return;
+		}
 
-		cont_.scrollTop = touchev_.top0 - touchev_.dy;
-		var dy = touchev_.dy + (cont_.scrollTop - touchev_.top0);
-		touchev_.pully = dy;
-
-		if (cont_.scrollTop <= 0 && dy > 0) {
+		// 顶部下拉
+		if (dy > 0 && cont_.scrollTop <= 0) {
 			touchev_.ac = "D";
 		}
-		else if (dy < 0 && cont_.scrollTop >= cont_.scrollHeight - cont_.clientHeight) {
+		// 底部上拉
+		else if (dy < 0 && isScrollBottom(cont_) ) {
 			touchev_.ac = "U";
 		}
 		updateHint(touchev_.ac, dy);
+
+		// 底部上拉显示上拉框
+		if (touchev_.ac == "U" && scrollContainer_) {
+			scrollToBottom(scrollContainer_);
+		}
 		ev.preventDefault();
 	}
 
@@ -4094,63 +4243,11 @@ function initPullList(container, opt)
 		updateHint(null, 0);
 	}
 
-	function momentumScroll(ev, onScrollEnd)
-	{
-		if (touchev_ == null || touchev_.momentum == null)
-			return;
-
-		// 惯性滚动
-		var m = touchev_.momentum;
-		var dt = new Date();
-		var duration = dt - m.startTime;
-		if (duration > SAMPLE_INTERVAL) {
-			onScrollEnd && onScrollEnd();
-			return;
-		}
-
-		var p = getPos(ev);
-		var v0 = (p[1]-m.y0) / duration;
-		if (v0 == 0) {
-			onScrollEnd && onScrollEnd();
-			return;
-		}
-
-		v0 *= 2.5;
-		var deceleration = 0.0005;
-
-		window.requestAnimationFrame(moveNext);
-		function moveNext() 
-		{
-			// 用户有新的点击，则取消动画
-			if (touchev_ != null)
-				return;
-
-			var dt1 = new Date();
-			var t = dt1 - dt;
-			dt = dt1;
-			var s = v0 * t / 2;
-			var dir = v0<0? -1: 1;
-			v0 -= deceleration * t * dir;
-			// 变加速运动
-			deceleration *= 1.1;
-
-			var top = cont_.scrollTop;
-			cont_.scrollTop = top - s;
-			if (v0 * dir > 0 && top != cont_.scrollTop) {
-				window.requestAnimationFrame(moveNext);
-			}
-			else {
-				onScrollEnd && onScrollEnd();
-			}
-		}
-	}
-
 	function touchEnd(ev)
 	{
 		updateHint(null, 0);
-		if (touchev_ == null || touchev_.ac == null || Math.abs(touchev_.pully) < opt_.threshold)
+		if (touchev_ == null || touchev_.ac == null || (Math.abs(touchev_.dy) < opt_.threshold && !(touchev_.ac == "U" && opt_.autoLoadMore)))
 		{
-			momentumScroll(ev, onScrollEnd);
 			touchev_ = null;
 			return;
 		}
@@ -4170,19 +4267,13 @@ function initPullList(container, opt)
 				opt_.onLoadItem.call(cont_, false);
 			}
 		}
-
-		function onScrollEnd()
-		{
-			if (opt_.autoLoadMore && dy_ < -20) {
-				var distanceToBottom = cont_.scrollHeight - cont_.clientHeight - cont_.scrollTop;
-				if (distanceToBottom <= TRIGGER_AUTOLOAD) {
-					doAction("U");
-				}
-			}
-		}
 	}
 }
+}
+jquery_pullList(window.jQuery);
+// ====== end of jquery-pullList }}}
 
+// ====== app fw: list page {{{
 /**
 @fn initPageList(jpage, opt) -> PageListInterface
 @alias initNavbarAndList
@@ -4342,7 +4433,7 @@ navRef是否为空的区别是，如果非空，则表示listRef是一组互斥�
 
 ## 参数说明
 
-@param opt {onGetQueryParam?, onAddItem?, onNoItem?, pageItf?, navRef?=">.hd .mui-navbar", listRef?=">.bd .p-list", onBeforeLoad?, onLoad?, onGetData?, canPullDown?=true, onRemoveAll?}
+@param opt {onGetQueryParam?, onAddItem?, onNoItem?, pageItf?, navRef?=">.hd .mui-navbar", listRef?=">.bd .p-list", onBeforeLoad?, onLoad?, onGetData?, onRemoveAll?}
 @param opt 分页相关 { pageszName?="_pagesz", pagekeyName?="_pagekey" }
 
 @param opt.onGetQueryParam Function(jlst, queryParam/o)
@@ -4580,20 +4671,6 @@ param={idx, arr, isFirstPage}
 
 jlst:: 当前活动页。函数如果返回false，则取消所有上拉加载或下拉刷新行为，使用系统默认行为。
 
-## 仅自动加载，禁止下拉刷新行为
-
-有时不想为列表容器指定固定高度，而是随着列表增长而自动向下滚动，在滚动到底时自动加载下一页。
-这时可禁止下拉刷新行为：
-
-	var listItf = initPageList(jpage, 
-		...,
-		canPullDown: false,
-	);
-
-@param opt.canPullDown?=true  是否允许下拉刷新
-
-设置为false时，当列表到底部时，可以自动加载下一页，但没有下拉刷新行为，这时页面容器也不需要确定高度。
-
  */
 window.initNavbarAndList = initPageList;
 function initPageList(jpage, opt)
@@ -4603,7 +4680,6 @@ function initPageList(jpage, opt)
 		listRef: ">.bd .p-list",
 		pageszName: "_pagesz",
 		pagekeyName: "_pagekey",
-		canPullDown: true,
 		onRemoveAll: function (jlst) {
 			jlst.empty();
 		}
@@ -4620,7 +4696,7 @@ function initPageList(jpage, opt)
 		linkNavbarAndList(jbtns_, jallList_);
 	}
 	if (jallList_.size() == 0)
-		throw "bad list";
+		throw "bad list: " + opt_.navRef;
 
 	init();
 
@@ -4660,35 +4736,21 @@ function initPageList(jpage, opt)
 			});
 		});
 
-		if (opt_.canPullDown) {
-			var pullListOpt = {
-				onLoadItem: showOrderList,
-				//onHint: $.noop,
-				onHintText: onHintText,
-				onPull: function (ev) {
-					var jlst = getActiveList();
-					if (jlst.is(".mui-noPull") || 
-						(opt_.onPull && opt_.onPull(ev, jlst) === false)) {
-						return false;
-					}
+		var pullListOpt = {
+			onLoadItem: showOrderList,
+			//onHint: $.noop,
+			onHintText: onHintText,
+			autoLoadMore: opt_.autoLoadMore,
+			onPull: function (ev) {
+				var jlst = getActiveList();
+				if (jlst.is(".mui-noPull") || 
+					(opt_.onPull && opt_.onPull(ev, jlst) === false)) {
+					return false;
 				}
-			};
+			},
+		};
 
-			jallList_.parent().each(function () {
-				var container = this;
-				initPullList(container, pullListOpt);
-			});
-		}
-		else {
-			jallList_.parent().scroll(function () {
-				var container = this;
-				//var distanceToBottom = cont_.scrollHeight - cont_.clientHeight - cont_.scrollTop;
-				if (! busy_ && container.scrollTop / (container.scrollHeight - container.clientHeight) >= 0.95) {
-					console.log("load more");
-					loadMore();
-				}
-			});
-		}
+		jallList_.parent().pullList(pullListOpt);
 
 		// 如果调用init时页面已经显示，则补充调用一次。
 		if (MUI.activePage && MUI.activePage.attr("id") == jpage.attr("id")) {
