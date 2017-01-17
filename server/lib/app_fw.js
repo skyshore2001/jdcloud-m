@@ -3792,95 +3792,135 @@ function formatField(obj)
 
 // ====== jquery-pullList {{{
 /**
-@fn $.fn.pullList(opt)
-@alias initPullList(container, opt)
+@module jquery-pullList
 
-为列表添加下拉刷新和上拉加载功能。
+为支持分页的列表添加下拉刷新和上拉加载功能。
+
+假设后端支持分页，取某列表接口的原型如下：
+
+	getOrderList(pagekey?=1, pagesz?=20) => { nextkey?, @list={id, name} }
+
+每次返回一页数据，用nextkey属性表示取下一页时请求中的pagekey参数，如果是最后一页，则没有nextkey属性。
+请求示例：
+
+	GET http://server/app/getOrderList?pagekey=1&pagesz=20
+
+返回示例：
+
+	{ nextkey: 2, list=[ {id:1, name: "item 1"} ,...] }
+
+下面举例说明用法，详细可参考 exmaple/index.html 中的例子。
+
+## 下拉列表示例
 
 例：页面元素如下：
 
-	<div mui-initfn="initPageOrders" mui-script="orders.js">
+	<style>
+	.bd {
+		overflow-y: auto;
+		height: 400px;
+	}
+	</style>
+	<div>
 		<div class="bd">
 			<div class="p-list"></div>
 		</div>
 	</div>
 
-设置下拉列表的示例代码如下：
+其中，类p-list作为列表，类bd作为容器，设置了确定的高度（实际项目中一般用js设置高度），从而在超出时可显示滚动条。
+
+设置支持分页的下拉列表的示例代码如下：
 
 	var pullListOpt = {
-		onLoadItem: showOrderList
+		onLoadItem: showOrderList,
+		//autoLoadMore: false
 	};
-	var container = jpage.find(".bd")[0];
-	initPullList(container, pullListOpt);
+	$(".bd").pullList(pullListOpt);
 
-	var nextkey;
 	function showOrderList(isRefresh)
 	{
-		var jlst = jpage.find(".p-list");
-		var param = {res: "id desc", cond: "status=1"};
-		if (nextkey == null)
-			isRefresh = true;
-		if (isRefresh)
+		var jlst = $(".p-list");
+		var param = {pagesz: 20};
+		if (isRefresh) {
+			// 刷新列表
 			jlst.empty();
-		param._pagekey = nextkey;
+			param.pagekey = 1;
+		}
+		else {
+			// 加载下一页
+			var pagekey = jlst.data("nextkey");
+			// 已是最后一页，不再加载更多
+			if (pagekey == null)
+				return;
+			param.pagekey = pagekey;
+		}
 
-		callSvr("Ordr.query", param, function (data) {
+		callSvr("getOrderList", param, function (data) {
 			// create items and append to jlst
-			// ....
+			$.each(data.list, function () {
+				$("<li>" + this.name + "</li>").appendTo(jlst);
+			});
+
+			// 处理下一页参数
 			if (data.nextkey)
-				nextkey = data.nextkey;
-			// TODO: 处理分页结束即nextkey为空的情况。
+				jlst.data("nextkey", data.nextkey);
+			else
+				jlst.removeData("nextkey");
 		});
 	}
+	showOrderList(true);
 
-注意：
+运行示例，下拉可刷新，上拉滚动到底可自动加载。如果想手动加载可设置选项`autoLoadMore = false`:
 
-- 由于page body的高度自动由框架设定，所以可以作为带滚动条的容器；如果是其它容器，一定要确保它有限定的宽度，以便可以必要时出现滚动条。
-- *** 由于处理分页的逻辑比较复杂，请调用 initPageList替代, 即使只有一个list；它会屏蔽nextkey, refresh等细节，并做一些优化。像这样调用：
+	var pullListOpt = {
+		onLoadItem: showOrderList,
+		autoLoadMore: false
+	};
+	$(".bd").pullList(pullListOpt);
 
-		initPageList(jpage, {
-			pageItf: PageOrders,
-			navRef: null,
-			listRef: jlst,
-			onGetQueryParam: ...
-			onAddItem: ...
-		});
+## autoload事件示例（自动上拉加载）
 
-本函数参数如下：
+@key example-autoload
 
-@param container 容器，它的高度应该是限定的，因而当内部内容过长时才可出现滚动条
-@param opt {onLoadItem, autoLoadMore?=true, threshold?=180, onHint?, onPull?}
+autoload事件可用于滚动到底自动加载，不支持下拉刷新。接上例，我们不用pullList方法，直接设置事件即可：
 
-@param opt.onLoadItem function(isRefresh)
+	// $(".bd").pullList(pullListOpt);
+	$(".bd").on("autoload", function (ev) {
+		showOrderList();
+	});
 
-在合适的时机，它调用 onLoadItem(true) 来刷新列表，调用 onLoadItem(false) 来加载列表的下一页。在该回调中this为container对象（即容器）。实现该函数时应当自行管理当前的页号(pagekey)
+一般用于简易分页加载场景。
 
-@param opt.autoLoadMore 当滑动到页面下方时（距离底部$.pullList.defaults.TRIGGER_AUTOLOAD=30px以内）自动加载更多项目。
+## 定制提示信息
 
-@param threshold 像素值。
+可设置CSS类mui-pullPrompt来定制提示信息的显示格式，如
 
-手指最少下划或上划这些像素后才会触发实际加载动作。
+	.mui-pullPrompt {
+		background-color: yellow;
+	}
 
-@param opt.onHint function(ac, dy, threshold)
+可设置CSS类mui-pullHint来指定hint显示的位置，默认是在容器的顶部。
 
-	ac  动作。"D"表示下拉(down), "U"表示上拉(up), 为null时应清除提示效果.
-	dy,threshold  用户移动偏移及临界值。dy>threshold时，认为触发加载动作。
+	<div>
+		<div class="bd"> <!-- pullList容器 -->
+			<p class="mui-pullHint">hello</p>  <!-- 如果未指定mui-pullHint，默认提示信息是显示容器顶部，即这行之上; 指定后，提示信息显示在该对象后面 -->
+			<div class="p-list"></div>
+		</div>
+	</div>
 
-提供提示用户刷新或加载的动画效果. 缺省实现是下拉或上拉时显示提示信息。
+可设置选项prefix来修改这些类名，如
 
-@param opt.onHintText function(ac, uptoThreshold)
+	$.fn.pullList.defaults.prefix = "jd";
 
-修改用户下拉/上拉时的提示信息。仅当未设置onHint时有效。onHint会生成默认提示，如果onHintText返回非空，则以返回内容替代默认内容。
-内容可以是一个html字符串，所以可以加各种格式。
+则CSS类名变为：`jd-pullPrompt`, `jd-pullHint`.
 
-	ac:: String. 当前动作，"D"或"U".
-	uptoThreshold:: Boolean. 是否达到阈值
+如果要修改提示信息，可提供回调函数 onHintText;
+如果要定制动画效果，可提供回调函数 onHint.
 
-@param opt.onPull function(ev)
-
-如果返回false，则取消上拉加载或下拉刷新行为，采用系统默认行为。
-
-测试用例：
+@see $.fn.pullList
+*/
+/*
+测试用例
 
 - 组件自身可出现滚动条，可下拉刷新，上拉到底时自动加载。
 - 组件自身无滚动条，但再向上有组件有滚动条，可下拉刷新，上拉到底时自动加载。
@@ -3898,7 +3938,7 @@ var m_version = '1.0';
 
 var m_exposed = {
 /**
-@fn jQuery-pullList.version()
+@fn jquery-pullList.version()
 
 取版本号:
 
@@ -3920,9 +3960,10 @@ var m_defaults = {
 /**
 @event autoload
 
-TODO: example
+滚动到底部时，触发自动加载事件。
+
+@see example-autoload
 */
-// 滚动动作结束或到刚好到底部
 $.event.special["autoload"] = {
 	setup: function () {
 		var busy_ = false;
@@ -3952,23 +3993,63 @@ $.event.special["autoload"] = {
 
 初始化pullList，或调用pullList的方法。
 
-@param opt
-@see $.fn.pullList.defaults
+@param opt 可选项，详细见下文。
+
+@param opt.onLoadItem function(isRefresh)
+
+在合适的时机，它调用 onLoadItem(true) 来刷新列表，调用 onLoadItem(false) 来加载列表的下一页。
+在该回调中this为container对象（即容器）。实现该函数时应当自行管理当前的页号(pagekey)
+
+@param opt.autoLoadMore?=true 当滑动到页面下方时（距离底部$.fn.pullList.defaults.TRIGGER_AUTOLOAD=30px以内）自动加载更多项目。
+
+@param opt.threshold?=180 像素值。
+
+手指最少下划或上划这些像素后才会触发实际加载动作。
+
+@param opt.TRIGGER_AUTOLOAD?=30 距离滚动到底的像素值，进入此范围触发自动加载。
+
+@param opt.prefix?="mui"  类名前缀
+
+影响以下名称：
+
+- CSS类`mui-pullPrompt` 下拉刷新/上拉加载提示块
+- CSS类`mui-pullHint` 指定下拉提示显示位置
+
+@param opt.onHint function(ac, dy, threshold)
+
+	ac  动作。"D"表示下拉(down), "U"表示上拉(up), 为null时应清除提示效果.
+	dy,threshold  用户移动偏移及临界值。dy>threshold时，认为触发加载动作。
+
+提供提示用户刷新或加载的动画效果. 缺省实现是下拉或上拉时显示提示信息。
+
+@param opt.onHintText function(ac, uptoThreshold)
+
+修改用户下拉/上拉时的提示信息。仅当未设置onHint时有效。onHint会生成默认提示，如果onHintText返回非空，则以返回内容替代默认内容。
+内容可以是一个html字符串，所以可以加各种格式。
+
+	ac:: String. 当前动作，"D"或"U".
+	uptoThreshold:: Boolean. 是否达到阈值
+
+@param opt.onPull function(ev)
+
+如果返回false，则取消上拉加载或下拉刷新行为，采用系统默认行为。
+
+@see jquery-pullList
  */
 $.fn.extend({
 	pullList: function(opt) {
 		var args = arguments;
+		if (typeof(opt) == "string")
+		{
+			var fname = opt;
+			if (! m_exposed[fname])
+				$.error("*** unknown call: " + fname);
+
+			args[0] = this;
+			return m_exposed[fname].apply(args[0], args);
+		}
+
 		return this.each(function () {
-			if (typeof(opt) == "string")
-			{
-				var fname = opt;
-				if (! m_exposed[fname])
-					$.error("*** unknown call: " + fname);
-
-				args[0] = $(this);
-				return m_exposed[fname].apply(args[0], args);
-			}
-
 			initPullList(this, opt);
 		});
 	}
@@ -3976,6 +4057,14 @@ $.fn.extend({
 
 /**
 @var $.fn.pullList.defaults
+
+为pullList设置缺省选项，如：
+
+	$.fn.pullList.defaults.threshold = 200;
+
+可设置的选项参考：
+
+@see $.fn.pullList
 */
 $.fn.pullList.defaults = m_defaults;
 
@@ -4005,6 +4094,10 @@ function scrollToBottom(o)
 
 /**
 @fn initPullList(container, opt)
+
+等价于
+
+	$(container).pullList(opt);
 
 @see $.fn.pullList
 */
@@ -4048,7 +4141,9 @@ function initPullList(container, opt)
 	{
 		var msg = null;
 		if (jo_ == null) {
-			jo_ = $("<div class='mui-pullPrompt'></div>");
+			// mui-pullPrompt
+			var pullPromptCls = m_defaults.prefix + "-pullPrompt";
+			jo_ = $("<div class='" + pullPromptCls + "'></div>");
 		}
 
 		var uptoThreshold = dy >= threshold;
@@ -4073,7 +4168,9 @@ function initPullList(container, opt)
 		jo_.height(height).css("lineHeight", height + "px");
 			
 		if (ac == "D") {
-			var c = cont_.getElementsByClassName("mui-pullHint")[0];
+			// mui-pullHint
+			var pullHintCls = m_defaults.prefix + "-pullHint";
+			var c = cont_.getElementsByClassName(pullHintCls)[0];
 			if (c)
 				jo_.appendTo(c);
 			else
@@ -4205,7 +4302,7 @@ function initPullList(container, opt)
 		var dy = touchev_.dy;
 
 		// 如果不是竖直下拉，不处理
-		if (touchev_.dy == 0 || Math.abs(touchev_.dx) > Math.abs(touchev_.dy)) {
+		if (Math.abs(touchev_.dx) > Math.abs(touchev_.dy)) {
 			touchCancel();
 			return;
 		}
