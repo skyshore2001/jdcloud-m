@@ -5192,20 +5192,27 @@ window.g_data = {}; // {userInfo, serverRev?, initClient?, testMode?, mockMode?}
 
 在IOS+cordova环境下，点击事件会有300ms延迟，默认会加载lib/fastclick.min.js解决。
 
-@var options.noHtml?=function(pageId) { return false; }
-@var options.onCreatePage = function () {}
+@var options.noHtml?=function(pageId) { return false; } 是否逻辑页没有HTML
+@var options.onCreatePage  自定义创建逻辑页
 
 一般逻辑页由html, js构成, 为支持集成react库(一般将源文件jsx编译为js, 不需要html), 也可只加载js文件. 
 noHtml选项根据pageId判断是否直接加载JS文件而不通过HTML文件. 
-而onCreatePage选项只用在页面的JS文件中，它返回逻辑页DOM(即jpage)。示例：页面nohtml只有文件nohtml.js:
+而onCreatePage选项只用在页面的JS文件中，它返回逻辑页DOM(即jpage)。注意：该选项仅在首次加载页面时调用，用后即清除。
+示例：页面nohtml只有文件nohtml.js:
 
-	function initPageNoHtml() {
-		// ...
-	}
-	MUI.options.onCreatePage = function () {
-		var jpage = $('<div mui-initfn="initPageNoHtml"></div>');
+	function createPageNoHtml() {
+		var jpage = $('<div><div class="hd"><h2>header</h2></div><div class="bd"></div></div>');
+		jpage.on("pagecreate", onPageCreate);
 		return jpage;
-	};
+
+		// 相当于普通的initPageXXX函数
+		function onPageCreate()
+		{
+			jpage.find(".bd").append($("<p>").html("initPage"));
+			jpage.on("pagebeforeshow", onPageBeforeShow);
+		}
+	}
+	MUI.options.onCreatePage = createPageNoHtml;
 
 */
 	var m_opt = self.options = {
