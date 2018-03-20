@@ -3,6 +3,9 @@ $.extend(MUI.options, {
 	appName: "user",
 	homePage: "#home",
 	pageFolder: "page",
+	noHtml: function (pageId) {
+		return pageId == "nohtml";
+	}
 });
 
 MUI.validateEntry([

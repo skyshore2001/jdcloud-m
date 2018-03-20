@@ -4097,6 +4097,7 @@ function initPageStack()
 initPageStack();
 // }}}
 
+// ret={pageId, pageRef, pageFile, noHtml/boolean}
 // "#"/"" => {pageId: "home", pageRef: "#home", pageFile: "{pageFolder}/home.html", templateRef: "#tpl_home"}
 // "#aaa" => {pageId: "aaa", pageRef: "#aaa", pageFile: "{pageFolder}/aaa.html", templateRef: "#tpl_aaa"}
 // "#xx/aaa.html" => {pageId: "aaa", pageRef: "#aaa", pageFile: "xx/aaa.html"}
@@ -4108,6 +4109,12 @@ function getPageInfo(pageRef)
 		pageRef = self.options.homePage;
 	var pageId = pageRef[0] == '#'? pageRef.substr(1): pageRef;
 	var ret = {pageId: pageId, pageRef: pageRef};
+
+	ret.noHtml = false;
+	if (self.options.noHtml && $.isFunction(self.options.noHtml))
+		ret.noHtml = self.options.noHtml(pageId);
+	var ext = ret.noHtml? ".js": ".html";
+
 	var p = pageId.lastIndexOf(".");
 	if (p == -1) {
 		p = pageId.lastIndexOf('-');
@@ -4115,7 +4122,7 @@ function getPageInfo(pageRef)
 			var plugin = pageId.substr(0, p);
 			var pageId2 = pageId.substr(p+1);
 			if (Plugins.exists(plugin)) {
-				ret.pageFile = self.options.pluginFolder + '/' + plugin + '/m2/page/' + pageId2 + '.html';
+				ret.pageFile = self.options.pluginFolder + '/' + plugin + '/m2/page/' + pageId2 + ext;
 			}
 		}
 		ret.templateRef = "#tpl_" + pageId;
@@ -4125,7 +4132,7 @@ function getPageInfo(pageRef)
 		ret.pageId = pageId.match(/[^.\/]+(?=\.)/)[0];
 	}
 	if (ret.pageFile == null) 
-		ret.pageFile = self.options.pageFolder + '/' + pageId.replace(/-/g, '/') + ".html";
+		ret.pageFile = self.options.pageFolder + '/' + pageId.replace(/-/g, '/') + ext;
 	return ret;
 }
 
@@ -4269,16 +4276,32 @@ function showPage(pageRef, opt)
 		self.enterWaiting(); // NOTE: leaveWaiting in initPage
 		var m = pi.pageFile.match(/(.+)\//);
 		var path = m? m[1]: "";
+		if (pi.noHtml) {
+			self.options.onCreatePage = null;
+			var dfd = mCommon.loadScript(pi.pageFile, function () {
+				if ($.isFunction(self.options.onCreatePage)) {
+					var html = self.options.onCreatePage();
+					loadPage(html, pageId, path);
+					self.options.onCreatePage = null;
+				}
+			});
+			dfd.fail(onFail);
+			return;
+		}
+
 		$.ajax(pi.pageFile, {error: null}).then(function (html) {
 			loadPage(html, pageId, path);
-		}).fail(function () {
+		}).fail(onFail);
+
+		function onFail() {
 			self.leaveWaiting();
 			self.app_alert("找不到页面: " + pageId, "e");
 			history.back();
 			return false;
-		});
+		}
 	}
 
+	// html: jQuery obj or html text
 	// path?=self.options.pageFolder
 	function loadPage(html, pageId, path)
 	{
@@ -4287,7 +4310,8 @@ function showPage(pageRef, opt)
 			m_jstash = $("<div id='muiStash' style='display:none'></div>").appendTo(self.container);
 		}
 		// 注意：如果html片段中有script, 在append时会同步获取和执行(jquery功能)
-		var jpage = $(html).filter("div");
+		var jpage = html instanceof jQuery?  html
+			: $(html).filter("div");
 		if (jpage.size() > 1 || jpage.size() == 0) {
 			console.log("!!! Warning: bad format for page '" + pageId + "'. Element count = " + jpage.size());
 			jpage = jpage.filter(":first");
@@ -5167,6 +5191,22 @@ window.g_data = {}; // {userInfo, serverRev?, initClient?, testMode?, mockMode?}
 @var options.disableFastClick?=false
 
 在IOS+cordova环境下，点击事件会有300ms延迟，默认会加载lib/fastclick.min.js解决。
+
+@var options.noHtml?=function(pageId) { return false; }
+@var options.onCreatePage = function () {}
+
+一般逻辑页由html, js构成, 为支持集成react库(一般将源文件jsx编译为js, 不需要html), 也可只加载js文件. 
+noHtml选项根据pageId判断是否直接加载JS文件而不通过HTML文件. 
+而onCreatePage选项只用在页面的JS文件中，它返回逻辑页DOM(即jpage)。示例：页面nohtml只有文件nohtml.js:
+
+	function initPageNoHtml() {
+		// ...
+	}
+	MUI.options.onCreatePage = function () {
+		var jpage = $('<div mui-initfn="initPageNoHtml"></div>');
+		return jpage;
+	};
+
 */
 	var m_opt = self.options = {
 		appName: "user",
